@@ -17,6 +17,7 @@ app.use(cors());
 app.use(express.static('uploads'));
 
 
+
 function getDBConnection(){
     let db = new sqlite3.Database('./db/main.db', sqlite3.OPEN_READWRITE, (err) => {
         if (err) {
@@ -99,13 +100,11 @@ app.get('/usuarios', (req, res) => {
     let db = getDBConnection();
     
     db.all('SELECT * FROM Usuarios', (err, rows) => {
-        
         if(err){
             res.json(returnError('Error in DB query'));
             db.close();
             throw(err);            
         }
-
         res.json(rows);
     });
     db.close();
@@ -130,6 +129,20 @@ app.delete('/eliminar-usuario/:user_id', (req, res) => {
     let params = [req.params.user_id];
     let err = deleteItem(query, params);
     res.json({err});
+});
+
+app.get('/deuda-usuario/:id_client', (req, res) => {
+    let db = getDBConnection();
+    db.all('SELECT SUM(adeudo) as deuda_cliente FROM Pedidos WHERE id_cliente = ?', [req.params.id_client] , (err, rows) => {
+        
+        if(err){
+            res.json(returnError('Error in DB query'));
+            db.close();
+            throw(err);            
+        }
+        res.json(rows);
+    });
+    db.close();
 });
 
 // Productos 
@@ -177,10 +190,11 @@ app.delete('/eliminar-producto/:product_id', jsonParser, (req, res) => {
 app.get('/clientes', (req, res) => {
     let db = getDBConnection();
 
-    db.all('SELECT * FROM Clientes', (err, rows) => {
+    db.all('SELECT * FROM clientes', (err, rows) => {
         if(err){
             res.json(returnError('Error in DB Query'));
         }
+        console.log(rows);
         res.json(rows);
     });
 
@@ -188,13 +202,14 @@ app.get('/clientes', (req, res) => {
 });
 
 
-app.post('/nuevo-cliente', jsonParser, (req, res) => {
-    let query = `INSERT INTO Clientes VALUES(null, ?, ?)`;
-    let values = [req.body.nombre, req.body.telefono];
+app.post('/nuevo-cliente', upload.single('foto'), (req, res) => {
+    let query = `INSERT INTO Clientes VALUES(null, ?, ?, ?)`;
+    let values = [req.body.nombre, req.body.telefono, req.file ?  'http://localhost:3002/' + req.file.filename : ''];
     console.log(values);
     let err = insertItem(query, values);
     console.log(err);
-    res.json({err});
+    // res.json({err});   
+    res.redirect('http://localhost:3000/clientes');
 });
 
 app.post('/editar-cliente', jsonParser, (req, res) => {
@@ -286,7 +301,7 @@ app.delete('/eliminar-proveedor/:supplier_id', (req, res) => {
 app.get('/compras', (req, res) => {
     let db = getDBConnection();
 
-    db.all('SELECT * FROM Compras', (err, rows) => {
+    db.all('SELECT * FROM Compras ORDER BY fecha', (err, rows) => {
         if(err){
             res.json(returnError('Error in DB Query'));
         }
@@ -326,7 +341,7 @@ app.delete('/eliminar-compra/:shopping_id', (req, res) => {
 app.get('/pedidos', (req, res) => {
     let db = getDBConnection();
 
-    db.all('SELECT * FROM Pedidos INNER JOIN Pedidos_detalle ON Pedidos.id = Pedidos_detalle.id_pedido', (err, rows) => {
+    db.all('SELECT * FROM Pedidos ORDER BY fecha DESC', (err, rows) => {
         if(err){
             res.json(returnError('Error in DB Query'));
         }
@@ -343,14 +358,39 @@ app.get('/pedidos', (req, res) => {
 // 1 = Pagado
 // 2 = Con adeudo/Fiado
 // 3 = Enviado
+// 4 = Pago Contra entrega
 
+function getCurrentDatetime(){
+    let date_ob = new Date();
+    // current date
+    // adjust 0 before single digit date
+    let date = ("0" + date_ob.getDate()).slice(-2);
+
+    // current month
+    let month = ("0" + (date_ob.getMonth() + 1)).slice(-2);
+
+    // current year
+    let year = date_ob.getFullYear();
+
+    // current hours
+    let hours = date_ob.getHours();
+
+    // current minutes
+    let minutes = date_ob.getMinutes();
+
+    // current seconds
+    let seconds = date_ob.getSeconds();
+
+    let datetime = year + "-" + month + "-" + date; // + " " + hours + ":" + minutes + ":" + seconds;
+    return datetime;
+}
 app.post('/nuevo-pedido', jsonParser, (req, res) => {
-    let query = `INSERT INTO Pedidos VALUES(null, ?, ?, ?, ?, 0, ?, 0, 1, ?)`;
+    let query = `INSERT INTO Pedidos VALUES(null, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`;
     const getItemsList = items => {
-        
         return items.map( item => item.name + ' x ' + item.kg + ' kg').join(', ');
     }
-    let values = [req.body.client.id, req.body.client.name, req.body.total, req.body.total, req.body.date, getItemsList(req.body.items)];
+    let fecha_pago = req.body.estado === 1 ? getCurrentDatetime() : null;
+    let values = [req.body.client.id, req.body.client.name, req.body.total, req.body.payment, req.body.total - req.body.payment, req.body.date, req.body.estado ,getItemsList(req.body.items), req.body.chalan, fecha_pago];
 
     let db = getDBConnection();
     let err = false;
@@ -383,16 +423,83 @@ app.post('/nuevo-pedido', jsonParser, (req, res) => {
 });
 
 
+app.post('/pagar-pedido', jsonParser, (req, res) => {  
+    console.log('pagando pedido');
+    let query = `UPDATE Pedidos set estado = 1, enviado = 0, adeudo=0, abono=?, fecha_pago=? WHERE id = ?`;
+    let values = [req.body.total, getCurrentDatetime(), req.body.order_id];
+
+    let db = getDBConnection();
+    let error = false;
+
+    db.run(query, values, function(err) {
+        if (err) {
+            error = true;
+            console.log(err.message);
+            // return console.log(err.message);
+        }
+
+        db.close();
+        res.json({error});
+    });
+    // close the database connection
+});
+
+app.post('/pce-pedido', jsonParser, (req, res) => {  
+    console.log('pagando pedido');
+    let query = `UPDATE Pedidos set estado = 4, enviado = 0, abono=0, chalan=? WHERE id = ?`;
+    let values = [req.body.chalan, req.body.order_id];
+
+    let db = getDBConnection();
+    let error = false;
+
+    db.run(query, values, function(err) {
+        if (err) {
+            error = true;
+            console.log(err.message);
+            // return console.log(err.message);
+        }
+
+        db.close();
+        res.json({error});
+    });
+    // close the database connection
+});
+
+app.post('/fiar-pedido', jsonParser, (req, res) => { 
+    console.log('pagando pedido');
+    let query = `UPDATE Pedidos set estado = 2, enviado = 0, abono=0 WHERE id = ?`;
+    let values = [req.body.order_id];
+
+    let db = getDBConnection();
+    let error = false;
+
+    db.run(query, values, function(err) {
+        if (err) {
+            error = true;
+            console.log(err.message);
+            // return console.log(err.message);
+        }
+
+        db.close();
+        res.json({error});
+    });
+    // close the database connection
+});
+
+app.post('/tets', jsonParser, (req, res) => {
+    res.json({ok: true});
+});
+
 // Login
 app.post('/login', jsonParser, (req, res) => {
     let db = getDBConnection();
 
-    db.all('SELECT * FROM Usuarios WHERE nombre=? AND pswd=?', [req.body.name, req.body.pswd], (err, rows) => {
+    db.all('SELECT rol FROM Usuarios WHERE nombre=? AND pswd=?', [req.body.name, req.body.pswd], (err, rows) => {
         if(err){
             res.json(returnError('Error in DB Query'));
         }
         if(rows.length > 0){
-            res.json({err: false});
+            res.json({rol: rows[0].rol, err: false});
         }
         else{
             res.json({err: true});
@@ -402,6 +509,27 @@ app.post('/login', jsonParser, (req, res) => {
     db.close(); 
 });
 
+
+// Caja
+app.post('/abrir-caja', jsonParser, (req, res) => { 
+    let query = `INSERT INTO Caja VALUES (?, abierta, ?, ?)`;
+    let values = [req.body.fecha, req.body.fondo, req.body.fondo];
+
+    let db = getDBConnection();
+    let error = false;
+
+    db.run(query, values, function(err) {
+        if (err) {
+            error = true;
+            console.log(err.message);
+            // return console.log(err.message);
+        }
+
+        db.close();
+        res.json({error});
+    });
+    // close the database connection
+});
 app.listen(port, () => {
     console.log(`Listening on port ${port}`);
 });
