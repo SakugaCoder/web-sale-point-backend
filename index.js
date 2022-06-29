@@ -52,7 +52,6 @@ function insertItem(query, values){
     return err;
 }
 
-
 function updateItem(query, values){
     let db = getDBConnection();
 
@@ -313,7 +312,11 @@ app.get('/compras', (req, res) => {
 
 app.post('/nuevo-compra', jsonParser, (req, res) => {
     let query = `INSERT INTO Compras VALUES(null, ?, ?, ?, ?)`;
-    let values = [req.body.product_id, req.body.kg, req.body.date, req.body.supplier_id];
+    let date = req.body.date;
+    if(req.body.supplier_id === 4){
+        date = getCurrentDatetime();
+    }
+    let values = [req.body.product_id, req.body.kg, date, req.body.supplier_id];
     let err = insertItem(query, values);
     res.json({err});
 });
@@ -384,13 +387,14 @@ function getCurrentDatetime(){
     let datetime = year + "-" + month + "-" + date; // + " " + hours + ":" + minutes + ":" + seconds;
     return datetime;
 }
+
 app.post('/nuevo-pedido', jsonParser, (req, res) => {
     let query = `INSERT INTO Pedidos VALUES(null, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`;
     const getItemsList = items => {
         return items.map( item => item.name + ' x ' + item.kg + ' kg').join(', ');
     }
     let fecha_pago = req.body.estado === 1 ? getCurrentDatetime() : null;
-    let values = [req.body.client.id, req.body.client.name, req.body.total, req.body.payment, req.body.total - req.body.payment, req.body.date, req.body.estado ,getItemsList(req.body.items), req.body.chalan, fecha_pago];
+    let values = [req.body.client.id, req.body.client.name, req.body.total, req.body.payment, req.body.total - req.body.payment, getCurrentDatetime(), req.body.estado ,getItemsList(req.body.items), req.body.chalan, fecha_pago];
 
     let db = getDBConnection();
     let err = false;
@@ -486,10 +490,6 @@ app.post('/fiar-pedido', jsonParser, (req, res) => {
     // close the database connection
 });
 
-app.post('/tets', jsonParser, (req, res) => {
-    res.json({ok: true});
-});
-
 // Login
 app.post('/login', jsonParser, (req, res) => {
     let db = getDBConnection();
@@ -512,8 +512,9 @@ app.post('/login', jsonParser, (req, res) => {
 
 // Caja
 app.post('/abrir-caja', jsonParser, (req, res) => { 
-    let query = `INSERT INTO Caja VALUES (?, abierta, ?, ?)`;
-    let values = [req.body.fecha, req.body.fondo, req.body.fondo];
+    let query = `INSERT INTO Caja VALUES (?, "abierta", ?, ?)`;
+    let current_date = getCurrentDatetime()
+    let values = [current_date, req.body.fondo, req.body.fondo];
 
     let db = getDBConnection();
     let error = false;
@@ -524,13 +525,226 @@ app.post('/abrir-caja', jsonParser, (req, res) => {
             console.log(err.message);
             // return console.log(err.message);
         }
-
         db.close();
         res.json({error});
     });
     // close the database connection
 });
+
+//Cierres de caja
+
+app.get('/cierres-caja', (req, res) => {
+    let db = getDBConnection();
+
+    db.all('SELECT * FROM Caja WHERE estado = "cerrada" ORDER BY fecha DESC', [], (err, rows) => {
+        if(err){
+            res.json(returnError('Error in DB Query'));
+        }
+        
+            res.json({cierres_caja: rows, err: false});
+    });
+
+    db.close(); 
+});
+
+// Cerrar caja
+app.post('/cerrar-caja', jsonParser, (req, res) => { 
+    let query = `UPDATE Caja SET estado="cerrada", total=?, ingresos=?, retiros=? WHERE fecha=?`;
+    let current_date = getCurrentDatetime()
+    let values = [req.body.total, req.body.ingresos, req.body.retiros, current_date];
+
+    let db = getDBConnection();
+    let error = false;
+
+    db.run(query, values, function(err) {
+        if (err) {
+            error = true;
+            console.log(err.message);
+            // return console.log(err.message);
+        }
+        db.close();
+        res.json({error});
+    });
+    // close the database connection
+});
+
+// Estado caja
+app.get('/estado-caja', jsonParser, async (req, res) => { 
+    let current_date = getCurrentDatetime();
+    let db = getDBConnection();
+    db.all('SELECT * FROM Caja WHERE fecha=?', [current_date], (err, rows) => {
+        if(err){
+            console.log(err);
+            res.json(returnError('Error in DB Query'));
+        }
+        else if(rows){
+            let caja = rows[0];
+            
+            db.all('SELECT SUM(total_pagar) as total_ingresos FROM Pedidos WHERE fecha = ? AND estado=1;', [current_date], (err, rows_ti) => {
+                if(err){
+                    console.log(err);
+                    return null;
+                }
+                else if(rows_ti){
+                    console.log(rows_ti);
+                    let ingresos = rows_ti[0].total_ingresos;
+                    return db.all('SELECT SUM(monto) as total_retiros FROM Retiros WHERE fecha_retiro = ?', [current_date], (err, rows_tr) => {
+                        if(err){
+                            console.log(err);
+                            return null;
+                        }
+                        else if(rows_tr){
+                            console.log(rows_tr);
+                            let retiros = rows_tr[0].total_retiros;
+                            return res.json({caja, ingresos, retiros, err: false});
+                            // return rows[0];
+                        }
+                        else{
+                            return null;
+                        }
+                    });
+                    //return rows[0];
+                }
+                else{
+                    return null;
+                }
+            });
+            // let ingresos = getTotalIncome(current_date);
+            // let retiros = getTotalOutcome(current_date);
+            // console.log(ingresos);
+            // res.json({caja: rows[0], ingresos,retiros, err: false});
+        }
+        else{
+            res.json({err: true});
+        }
+    });
+    // close the database connection
+});
+
+// Retirar dinero
+app.post('/retirar-dinero', jsonParser, (req, res) => { 
+    let query = `INSERT INTO Retiros VALUES (null, ?, ?)`;
+    let current_date = getCurrentDatetime()
+    let values = [current_date, req.body.monto];
+
+    let db = getDBConnection();
+    let error = false;
+
+    db.run(query, values, function(err) {
+        if (err) {
+            error = true;
+            console.log(err.message);
+            // return console.log(err.message);
+        }
+        db.close();
+        res.json({error});
+    });
+    // close the database connection
+});
+
+app.post('/merma', jsonParser, (req, res) => {
+    console.log('merma');
+    let merma = req.body.merma;
+    let producto = req.body.producto;
+    let error = false;
+
+    let db = getDBConnection();
+    db.run('INSERT INTO Merma VALUES (null, ?, ?)', [producto, merma], (err) => {
+        console.log(err);
+        if(err){
+            console.log(err.message);
+            error = true;
+        }
+        db.close();
+        res.json({error});
+    });
+});
+
+app.get('/stock', (req, res) => {
+    let db = getDBConnection();
+    getAllProducts(db, function(err, products){
+        console.log(products);
+        if(err)
+            res.json(returnError('Error'));
+        
+        let stock = []
+        let total_items = products.length;
+        let counter = 0;
+
+        products.forEach( product => {
+            getShoppingTotal(db, product.id, function(err_2, total_compras){
+                getOrderTotal(db, product.id, function(err_2, total_pedidos){
+                    getMermaTotal(db, product.id, function(err_3, total_merma){
+                        stock.push({id: product.id, nombre: product.name, total_compras, total_pedidos, total_merma});
+                        console.log(stock);
+                        counter++;
+                        if(counter >= total_items)
+                            endResponse();
+                    });
+                });
+            });
+        });
+        function endResponse(){
+            res.json(stock);
+        }
+        // res.json({ok: true});
+    });
+});
+
+// Stock functions
+function getAllProducts(db, callback){
+    db.all('SELECT * FROM Productos', [], (err, rows) => {
+        if(err){
+            console.log(err);
+            callback(err, null);
+        }
+        else if(rows){
+            callback(null, rows);
+        }
+    });
+}
+
+function getShoppingTotal(db, product_id, callback){
+        db.all('SELECT sum(kg) as total_compras FROM Compras WHERE id_producto = ?;', [product_id], (err, rows) => {
+        if(err){
+            console.log(err);
+            callback(err, null);
+        }
+
+        else if(rows){
+            callback(null, rows[0].total_compras);
+        }
+    });
+}
+
+function getOrderTotal(db, product_id, callback){
+    db.all('SELECT sum(cantidad_kg) as total_pedidos FROM Pedidos_detalle WHERE id_producto = ?;', [product_id], (err, rows) => {
+        if(err){
+            console.log(err);
+            callback(err, null);
+        }
+
+        else if(rows){
+            callback(null, rows[0].total_pedidos);
+        }
+    });
+}
+
+function getMermaTotal(db, product_id, callback){
+    db.all('SELECT sum(cantidad_merma) as total_merma FROM Merma WHERE id_producto = ?;', [product_id], (err, rows) => {
+        if(err){
+            console.log(err);
+            callback(err, null);
+        }
+
+        else if(rows){
+            callback(null, rows[0].total_merma);
+        }
+    });
+}
+
 app.listen(port, () => {
     console.log(`Listening on port ${port}`);
 });
 
+function calculateDaysBetweenDates(begin, end){}

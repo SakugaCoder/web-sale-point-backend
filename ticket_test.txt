@@ -1,0 +1,8 @@
+Cliente: Diego Fecha: 2020-02-23
+Deuda: $24 Chalan: Ninguno
+
+Pedido:
+
+Mango x 1kg = $30
+Meon x 2kg = $57
+Sandia x 4kg = $67
