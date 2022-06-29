@@ -512,7 +512,7 @@ app.post('/login', jsonParser, (req, res) => {
 
 // Caja
 app.post('/abrir-caja', jsonParser, (req, res) => { 
-    let query = `INSERT INTO Caja VALUES (?, "abierta", ?, ?)`;
+    let query = `INSERT INTO Caja VALUES (?, "abierta", ?, ?, 0, 0)`;
     let current_date = getCurrentDatetime()
     let values = [current_date, req.body.fondo, req.body.fondo];
 
