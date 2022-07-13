@@ -1,7 +1,12 @@
 let express = require('express');
 let app = express();
 let sqlite3 = require('sqlite3');
-var cors = require('cors')
+var cors = require('cors');
+
+const { SerialPort } = require('serialport');
+const serial_port = new SerialPort({ path: 'COM5', baudRate: 9600 });
+
+let current_kg = 0;
 
 var bodyParser = require('body-parser')
 
@@ -17,6 +22,27 @@ app.use(cors());
 app.use(express.static('uploads'));
 
 
+serial_port.on('error', function(err) {
+    console.log('Error: ', err.message)
+});
+
+setInterval( () => {
+    serial_port.write('P');
+}, 800);
+
+
+serial_port.on('data', function (data) {
+    let kg_str = data.toString();
+    console.log('Data:', kg_str);
+    console.log(kg_str.length);
+
+    if(kg_str.length ===  10){
+        console.log('FINDED');
+        current_kg = kg_str.replace(/\s/g, '');
+        current_kg = Number(kg_str.split('kg')[0]);
+        console.log(current_kg)
+    }
+});
 
 function getDBConnection(){
     let db = new sqlite3.Database('./db/main.db', sqlite3.OPEN_READWRITE, (err) => {
@@ -689,6 +715,11 @@ app.get('/stock', (req, res) => {
         }
         // res.json({ok: true});
     });
+});
+
+app.get('/bascula', (req, res) => {
+    console.log('bascula');
+    res.json({kg_bascula: current_kg});
 });
 
 // Stock functions
