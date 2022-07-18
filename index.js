@@ -2,6 +2,10 @@ let express = require('express');
 let app = express();
 let sqlite3 = require('sqlite3');
 var cors = require('cors');
+const jsPDF = require("jspdf");
+const child_process = require("child_process");
+
+const exec = child_process.exec;
 
 const { SerialPort } = require('serialport');
 const serial_port = new SerialPort({ path: 'COM5', baudRate: 9600 });
@@ -321,7 +325,6 @@ app.delete('/eliminar-proveedor/:supplier_id', (req, res) => {
     res.json({err});
 });
 
-
 // Compras
 app.get('/compras', (req, res) => {
     let db = getDBConnection();
@@ -378,6 +381,19 @@ app.get('/pedidos', (req, res) => {
         res.json(rows);
     });
 
+    db.close();
+});
+
+app.get('/pedido/:order_id', (req, res) => {
+    let db = getDBConnection();
+
+    db.all('SELECT * FROM Pedidos_detalle WHERE id_pedido = ?',[req.params.order_id] , (err, rows) => {
+        if(err){
+            res.json(returnError('Error in DB Query'));
+        }
+        console.log(rows);
+        res.json(rows);
+    });
     db.close();
 });
 
@@ -721,6 +737,164 @@ app.get('/bascula', (req, res) => {
     console.log('bascula');
     res.json({kg_bascula: current_kg});
 });
+
+
+app.post('/imprimir-ticket', jsonParser ,(req, res) => {
+    console.log(req.body);
+    generateTicket(req.body);
+    res.json({ok: true});
+});
+
+
+function roundNumber(num){
+    return Math.round((num + Number.EPSILON) * 100) / 100
+}
+
+function generateTicket(order){
+    let nombre_negocio = 'Verduleria Trenado';
+    let direccion = 'La sierrita, 76137, Queretaro centro';
+
+    function getTotal(products){
+        let total = 0;
+        products.forEach( product => total += (product.precio_kg * product.cantidad_kg) );
+        return total;
+    }
+    
+    const total = String(roundNumber(getTotal(order.productos)));
+    let cambio = String(roundNumber(order.efectivo - total));
+    let efectivo = 0;
+    if(order.efectivo){
+        efectivo = order.efectivo;
+    }
+    
+    if(cambio < 0)
+        cambio = 0;
+    
+    let paper_height = order.productos.length * 4;
+    const doc = new jsPDF.jsPDF({
+        orientation: "portrait",
+        unit: "mm",
+        format: [50, 54 + paper_height]
+    });
+    
+    let current_y = 0;
+    
+    
+    doc.setFontSize(8);
+    
+    doc.text(nombre_negocio, 13, 2);
+    doc.text(direccion, 2, 6);
+    
+    doc.setFont("helvetica", "normal");
+    doc.text('Fecha:', 1, 14);
+    doc.setFont("helvetica", "bold");
+    doc.text(order.fecha, 10, 14);
+    
+    doc.setFont("helvetica", "normal");
+    doc.text('ID pedido:', 28, 14);
+    doc.setFont("helvetica", "bold");
+    doc.text(String(order.id_pedido), 42, 14);
+    
+    current_y = 18;
+    
+    doc.setFont("helvetica", "normal");
+    doc.text('Cajero:', 1, current_y);
+    doc.setFont("helvetica", "bold");
+    doc.text(String(order.cajero), 10, current_y);
+    
+    doc.setFont("helvetica", "normal");
+    doc.text('Chalan:', 28, current_y);
+    doc.setFont("helvetica", "bold");
+    doc.text(String(order.chalan), 38, current_y);
+    
+    current_y = 22;
+    
+    doc.setFont("helvetica", "normal");
+    doc.text('Cliente:', 1, current_y);
+    doc.setFont("helvetica", "bold");
+    doc.text(String(order.cliente), 11, current_y);
+    
+    doc.setFont("helvetica", "normal");
+    doc.text('Adeudo:', 28, current_y);
+    doc.setFont("helvetica", "bold");
+    doc.text(String(order.adeudo), 39, current_y);
+    
+    current_y = 26;
+    
+    doc.setFont("helvetica", "normal");
+    doc.text('Estado nota:', 1, current_y);
+    doc.setFont("helvetica", "bold");
+    doc.text(order.estado_nota, 18, current_y);
+    
+    current_y = 32;
+    
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(6);
+    doc.text('Cantidad', 1, current_y);
+    doc.text('Descripcion', 12, current_y);
+    doc.text('Precio', 28, current_y);
+    doc.text('Importe', 40, current_y);
+    
+    current_y = 32;
+    doc.setFont("helvetica", "normal");
+    order.productos.forEach( function(producto) {
+        current_y += 4;
+        doc.text(''+ roundNumber(producto.cantidad_kg), 1, current_y);
+        doc.text(producto.nombre_producto, 12, current_y);
+        doc.text('$'+ String(producto.precio_kg.toFixed(2)), 28, current_y);
+        doc.text('$'+ String( (producto.precio_kg.toFixed(2) * producto.cantidad_kg.toFixed(2)) .toFixed(2)), 40, current_y);
+    });
+    
+    
+    current_y += 4;
+    
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "bold");
+    doc.text('--------------------------------------------------', 1, current_y);
+    
+    current_y += 4;
+    
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "normal");
+    doc.text('Total:', 1, current_y);
+    doc.setFont("helvetica", "bold");
+    doc.text('$'+total, 18, current_y);
+    
+    current_y += 3;
+    
+    doc.setFont("helvetica", "normal");
+    doc.text('Efectivo:', 1, current_y);
+    doc.setFont("helvetica", "bold");
+    doc.text('$'+String(efectivo), 18, current_y);
+    
+    current_y += 3;
+    
+    doc.setFont("helvetica", "normal");
+    doc.text('Cambio:', 1, current_y);
+    doc.setFont("helvetica", "bold");
+    doc.text('$'+cambio, 18, current_y);
+    
+    current_y += 4;
+    
+    doc.setFont("helvetica", "bold");
+    doc.text('Gracias por su compra', 8, current_y);
+    
+    doc.save("ticket.pdf");
+    console.log('Ticket nuevo generado!');
+    
+
+    exec('PDFtoPrinter.exe ticket.pdf', (error, stdout, stderr) => {
+        if (error) {
+            console.log(`error: ${error.message}`);
+            return;
+        }
+        if (stderr) {
+            console.log(`stderr: ${stderr}`);
+            return;
+        }
+        console.log(`stdout: ${stdout}`);
+    });
+}
 
 // Stock functions
 function getAllProducts(db, callback){
