@@ -430,13 +430,28 @@ function getCurrentDatetime(){
     return datetime;
 }
 
+function getOrderStatusText(n){
+    switch(n){
+        case 1:
+            return 'Pagado';
+        case 2:
+            return 'Adeudo';
+        case 3:
+            return 'Enviado';
+        case 4:
+            return 'PCE';
+        default:
+            return '';
+    };
+}
+
 app.post('/nuevo-pedido', jsonParser, (req, res) => {
-    let query = `INSERT INTO Pedidos VALUES(null, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`;
+    let query = `INSERT INTO Pedidos VALUES(null, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`;
     const getItemsList = items => {
         return items.map( item => item.name + ' x ' + item.kg + ' kg').join(', ');
     }
     let fecha_pago = req.body.estado === 1 ? getCurrentDatetime() : null;
-    let values = [req.body.client.id, req.body.client.name, req.body.total, req.body.payment, req.body.total - req.body.payment, getCurrentDatetime(), req.body.estado ,getItemsList(req.body.items), req.body.chalan, fecha_pago];
+    let values = [req.body.client.id, req.body.client.name, req.body.total, req.body.payment, req.body.total - req.body.payment, getCurrentDatetime(), req.body.estado ,getItemsList(req.body.items), req.body.chalan, fecha_pago, req.body.efectivo, req.body.cajero];
 
     let db = getDBConnection();
     let err = false;
@@ -446,6 +461,7 @@ app.post('/nuevo-pedido', jsonParser, (req, res) => {
             err = true;
             return console.log(err.message);
         }
+
         // get the last insert id
         console.log(`A row has been inserted with rowid ${this.lastID}`);
 
@@ -460,6 +476,45 @@ app.post('/nuevo-pedido', jsonParser, (req, res) => {
                 }
             });
         });
+
+        db.all('SELECT * FROM Pedidos WHERE id = ?', [order_id], function(err, rows){
+            // if (err) {
+            //     err = true;
+            //     return console.log(err.message);
+            // }
+            let order_data = rows[0];
+            let final_ticket_data = {
+                id_pedido: order_data.id,
+                fecha: order_data.fecha,
+                cajero: req.body.cajero,
+                chalan: order_data.chalan ? order_data.chalan.split(',')[0] : 'NA',
+                cliente: order_data.id_cliente,
+                adeudo: order_data.adeudo,
+                estado_nota: getOrderStatusText(order_data.estado),
+                efectivo: order_data.efectivo,
+                productos: req.body.items.map( function(item){ 
+                    return {
+                        nombre_producto: item.name,
+                        precio_kg: item.price,
+                        cantidad_kg: item.kg
+                    }
+                })
+            }
+            console.log(final_ticket_data);
+            generateTicket(final_ticket_data);
+        });
+
+        // let final_ticket_data = {
+        //     id_pedido: ticket_order.id,
+        //     fecha: getCurrentDatetime(),
+        //     cajero: req.body.cajero,
+        //     chalan: req.body.chalan ? req.body.chalan.split(',')[0] : 'NA',
+        //     cliente: req.body.client_id,
+        //     adeudo: ticket_order.adeudo,
+        //     estado_nota: getOrderStatusText(ticket_order.estado),
+        //     efectivo: null,
+        //     productos: ticket_order.detalle
+        // };
 
     });
 
@@ -740,7 +795,6 @@ app.get('/bascula', (req, res) => {
 
 
 app.post('/imprimir-ticket', jsonParser ,(req, res) => {
-    console.log(req.body);
     generateTicket(req.body);
     res.json({ok: true});
 });
@@ -839,10 +893,10 @@ function generateTicket(order){
     doc.setFont("helvetica", "normal");
     order.productos.forEach( function(producto) {
         current_y += 4;
-        doc.text(''+ roundNumber(producto.cantidad_kg), 1, current_y);
+        doc.text(''+ String(producto.cantidad_kg), 1, current_y);
         doc.text(producto.nombre_producto, 12, current_y);
         doc.text('$'+ String(producto.precio_kg.toFixed(2)), 28, current_y);
-        doc.text('$'+ String( (producto.precio_kg.toFixed(2) * producto.cantidad_kg.toFixed(2)) .toFixed(2)), 40, current_y);
+        doc.text('$'+ String( (producto.precio_kg * producto.cantidad_kg).toFixed(2)), 40, current_y);
     });
     
     
