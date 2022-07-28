@@ -1,9 +1,7 @@
 const jsPDF = require("jspdf");
 
-
-
 function roundNumber(num){
-    return Math.round((num + Number.EPSILON) * 100) / 100
+    return Math.round((num + Number.EPSILON) * 100) / 100;
 }
 
 function generateTicket(order){
@@ -26,7 +24,7 @@ function generateTicket(order){
     const doc = new jsPDF.jsPDF({
         orientation: "portrait",
         unit: "mm",
-        format: [50, 54 + paper_height]
+        format: [50, (290 - paper_height) + paper_height]
     });
     
     let current_y = 0;

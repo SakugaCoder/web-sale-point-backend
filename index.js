@@ -8,7 +8,7 @@ const child_process = require("child_process");
 const exec = child_process.exec;
 
 const { SerialPort } = require('serialport');
-const serial_port = new SerialPort({ path: 'COM5', baudRate: 9600 });
+const serial_port = new SerialPort({ path: 'COM7', baudRate: 9600 });
 
 let current_kg = 0;
 
@@ -828,7 +828,7 @@ function generateTicket(order){
     const doc = new jsPDF.jsPDF({
         orientation: "portrait",
         unit: "mm",
-        format: [50, 54 + paper_height]
+        format: [50, (290 - paper_height) + paper_height]
     });
     
     let current_y = 0;
