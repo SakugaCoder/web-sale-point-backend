@@ -8,9 +8,10 @@ const child_process = require("child_process");
 const exec = child_process.exec;
 
 const { SerialPort } = require('serialport');
-const serial_port = new SerialPort({ path: 'COM7', baudRate: 9600 });
+const serial_port = new SerialPort({ path: 'COM5', baudRate: 9600 });
 
 let current_kg = 0;
+let data_available = false;
 
 var bodyParser = require('body-parser')
 
@@ -18,7 +19,7 @@ const multer  = require('multer')
 const upload = multer({ dest: 'uploads/' });
 
 // create application/json parser
-var jsonParser = bodyParser.json()
+var jsonParser = bodyParser.json();
 
 let port = 3002;
 
@@ -27,12 +28,35 @@ app.use(express.static('uploads'));
 
 
 serial_port.on('error', function(err) {
-    console.log('Error: ', err.message)
+    console.log('Error 2 de lectura de bascula. Por favor cerrar programa, volver a conectar bascula y ejecutar el programa');
 });
+
+// tare
 
 setInterval( () => {
     serial_port.write('P');
 }, 800);
+
+setTimeout( () => {
+    if(data_available){
+        // Inicia servidor
+        exec('start_frontend.bat', (error, stdout, stderr) => {
+            if (error) {
+                console.log(`error: ${error.message}`);
+                return;
+            }
+            if (stderr) {
+                console.log(`stderr: ${stderr}`);
+                return;
+            }
+            console.log(`stdout: ${stdout}`);
+        });
+    }
+
+    else{
+        console.log('Error de lectura de bascula. Por favor cerrar programa, volver a conectar bascula y ejecutar el programa');
+    }
+}, 10000);
 
 
 serial_port.on('data', function (data) {
@@ -41,7 +65,8 @@ serial_port.on('data', function (data) {
     console.log(kg_str.length);
 
     if(kg_str.length ===  10){
-        console.log('FINDED');
+        data_available = true;
+        console.log('DATA AVAILABLE');
         current_kg = kg_str.replace(/\s/g, '');
         current_kg = Number(kg_str.split('kg')[0]);
         console.log(current_kg)
@@ -192,19 +217,19 @@ app.get('/productos', (req, res) => {
 app.post('/nuevo-producto', upload.single('foto'), (req, res) => {
     // console.log(req.body);
     // console.log(req.file);
-    let query = `INSERT INTO Productos VALUES(null, ?, ?, ?)`;
-    let values = [req.body.nombre, req.body.precio, 'http://localhost:3002/' + req.file.filename ];
+    let query = `INSERT INTO Productos VALUES(null, ?, ?, ?, ?)`;
+    let values = [req.body.nombre, req.body.precio, 'http://localhost:3002/' + req.file.filename, req.body.venta_por ];
     insertItem(query, values);
     res.redirect('http://localhost:3000/productos');
 });
 
 app.post('/editar-producto', jsonParser, (req, res) => {
-    let query = `UPDATE Productos set name=?, price=? WHERE id=?`;
-    let params = [req.body.name, req.body.price, req.body.product_id];
+    let query = `UPDATE Productos set name=?, price=?, venta_por=?  WHERE id=?`;
+    let params = [req.body.name, req.body.price, req.body.venta_por, req.body.product_id];
     console.log(params);
     let err = updateItem(query, params);
     console.log(err);
-    res.json({err});
+    res.json({err});    
 });
 
 app.delete('/eliminar-producto/:product_id', jsonParser, (req, res) => {
@@ -448,7 +473,7 @@ function getOrderStatusText(n){
 app.post('/nuevo-pedido', jsonParser, (req, res) => {
     let query = `INSERT INTO Pedidos VALUES(null, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`;
     const getItemsList = items => {
-        return items.map( item => item.name + ' x ' + item.kg + ' kg').join(', ');
+        return items.map( item => item.name + ' x ' + item.kg + ' ' +item.venta_por).join(', ');
     }
     let fecha_pago = req.body.estado === 1 ? getCurrentDatetime() : null;
     let values = [req.body.client.id, req.body.client.name, req.body.total, req.body.payment, req.body.total - req.body.payment, getCurrentDatetime(), req.body.estado ,getItemsList(req.body.items), req.body.chalan, fecha_pago, req.body.efectivo, req.body.cajero];
@@ -789,7 +814,7 @@ app.get('/stock', (req, res) => {
 });
 
 app.get('/bascula', (req, res) => {
-    console.log('bascula');
+    //console.log('bascula');
     res.json({kg_bascula: current_kg});
 });
 
