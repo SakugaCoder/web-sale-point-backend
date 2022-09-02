@@ -8,7 +8,7 @@ const child_process = require("child_process");
 const exec = child_process.exec;
 
 const { SerialPort } = require('serialport');
-const serial_port = new SerialPort({ path: 'COM7', baudRate: 9600 });
+const serial_port = new SerialPort({ path: 'COM5', baudRate: 9600 });
 
 let current_kg = 0;
 let data_available = false;
@@ -36,6 +36,27 @@ serial_port.on('error', function(err) {
 setInterval( () => {
     serial_port.write('P');
 }, 800);
+
+setTimeout( () => {
+    if(data_available){
+        // Inicia servidor
+        exec('start_frontend.bat', (error, stdout, stderr) => {
+            if (error) {
+                console.log(`error: ${error.message}`);
+                return;
+            }
+            if (stderr) {
+                console.log(`stderr: ${stderr}`);
+                return;
+            }
+            console.log(`stdout: ${stdout}`);
+        });
+    }
+
+    else{
+        console.log('Error de lectura de bascula. Por favor cerrar programa, volver a conectar bascula y ejecutar el programa');
+    }
+}, 10000);
 
 
 serial_port.on('data', function (data) {
@@ -132,7 +153,7 @@ app.get('/', (req, res) => {
 app.get('/usuarios', (req, res) => {
     let db = getDBConnection();
     
-    db.all('SELECT * FROM Usuarios ORDER BY nombre ASC', (err, rows) => {
+    db.all('SELECT * FROM Usuarios', (err, rows) => {
         if(err){
             res.json(returnError('Error in DB query'));
             db.close();
@@ -182,7 +203,7 @@ app.get('/deuda-usuario/:id_client', (req, res) => {
 app.get('/productos', (req, res) => {
     let db = getDBConnection();
 
-    db.all('SELECT * FROM Productos ORDER BY name ASC', (err, rows) => {
+    db.all('SELECT * FROM Productos', (err, rows) => {
         if(err){
             res.json(returnError('Error in DB Query'));
         }
@@ -197,21 +218,14 @@ app.post('/nuevo-producto', upload.single('foto'), (req, res) => {
     // console.log(req.body);
     // console.log(req.file);
     let query = `INSERT INTO Productos VALUES(null, ?, ?, ?, ?)`;
-    let values =  null;
-    if(req.file){
-    	values = [req.body.nombre, req.body.precio, 'http://localhost:3002/' + req.file.filename, req.body.venta_por ];	
-    }
-    else{
-		values = [req.body.nombre, req.body.precio, 'http://localhost:3002/default.jpg', req.body.venta_por ];	
-    }
-    
+    let values = [req.body.nombre, req.body.precio, 'http://localhost:3002/' + req.file.filename, req.body.venta_por ];
     insertItem(query, values);
     res.redirect('http://localhost:3000/productos');
 });
 
 app.post('/editar-producto', jsonParser, (req, res) => {
-    let query = `UPDATE Productos set price=? WHERE id=?`;
-    let params = [req.body.price, req.body.product_id];
+    let query = `UPDATE Productos set name=?, price=?, venta_por=?  WHERE id=?`;
+    let params = [req.body.name, req.body.price, req.body.venta_por, req.body.product_id];
     console.log(params);
     let err = updateItem(query, params);
     console.log(err);
@@ -230,7 +244,7 @@ app.delete('/eliminar-producto/:product_id', jsonParser, (req, res) => {
 app.get('/clientes', (req, res) => {
     let db = getDBConnection();
 
-    db.all('SELECT * FROM clientes ORDER BY id ASC', (err, rows) => {
+    db.all('SELECT * FROM clientes', (err, rows) => {
         if(err){
             res.json(returnError('Error in DB Query'));
         }
@@ -242,9 +256,9 @@ app.get('/clientes', (req, res) => {
 });
 
 
-app.post('/nuevo-cliente', (req, res) => {
+app.post('/nuevo-cliente', upload.single('foto'), (req, res) => {
     let query = `INSERT INTO Clientes VALUES(null, ?, ?, ?)`;
-    let values = [req.body.nombre, req.body.telefono ] ;
+    let values = [req.body.nombre, req.body.telefono, req.file ?  'http://localhost:3002/' + req.file.filename : ''];
     console.log(values);
     let err = insertItem(query, values);
     console.log(err);
@@ -270,7 +284,7 @@ app.delete('/eliminar-cliente/:client_id', (req, res) => {
 app.get('/chalanes', (req, res) => {
     let db = getDBConnection();
 
-    db.all('SELECT * FROM Chalanes ORDER BY nombre ASC', (err, rows) => {
+    db.all('SELECT * FROM Chalanes', (err, rows) => {
         if(err){
             res.json(returnError('Error in DB Query'));
         }
@@ -305,7 +319,7 @@ app.delete('/eliminar-chalan/:chalan_id', (req, res) => {
 app.get('/proveedores', (req, res) => {
     let db = getDBConnection();
 
-    db.all('SELECT * FROM Proveedores ORDER BY nombre ASC', (err, rows) => {
+    db.all('SELECT * FROM Proveedores', (err, rows) => {
         if(err){
             res.json(returnError('Error in DB Query'));
         }
@@ -340,7 +354,7 @@ app.delete('/eliminar-proveedor/:supplier_id', (req, res) => {
 app.get('/compras', (req, res) => {
     let db = getDBConnection();
 
-    db.all('SELECT * FROM Compras ORDER BY fecha DESC', (err, rows) => {
+    db.all('SELECT * FROM Compras ORDER BY fecha', (err, rows) => {
         if(err){
             res.json(returnError('Error in DB Query'));
         }
@@ -384,7 +398,7 @@ app.delete('/eliminar-compra/:shopping_id', (req, res) => {
 app.get('/pedidos', (req, res) => {
     let db = getDBConnection();
 
-    db.all('SELECT * FROM Pedidos ORDER BY id DESC', (err, rows) => {
+    db.all('SELECT * FROM Pedidos ORDER BY fecha DESC', (err, rows) => {
         if(err){
             res.json(returnError('Error in DB Query'));
         }
@@ -402,7 +416,7 @@ app.get('/pedido/:order_id', (req, res) => {
         if(err){
             res.json(returnError('Error in DB Query'));
         }
-        // console.log(rows);
+        console.log(rows);
         res.json(rows);
     });
     db.close();
@@ -467,14 +481,10 @@ app.post('/nuevo-pedido', jsonParser, (req, res) => {
     let db = getDBConnection();
     let err = false;
 
-    console.log("Inserting new order")
-
-    db.run(query, values, function(error) {
-        if (error) {
+    db.run(query, values, function(err) {
+        if (err) {
             err = true;
-            console.log(err.message);
-            console.log(error);
-            return null;
+            return console.log(err.message);
         }
 
         // get the last insert id
@@ -484,8 +494,8 @@ app.post('/nuevo-pedido', jsonParser, (req, res) => {
         req.body.items.forEach( item => {
             let detail_query = `INSERT INTO Pedidos_detalle VALUES(null, ?, ?, ?, ?, ?)`;
             let detail_params = [order_id, item.id, item.name, item.kg, item.price];
-            db.run(detail_query, detail_params, function(detail_error){
-                if (detail_error) {
+            db.run(detail_query, detail_params, function(error){
+                if (error) {
                     err = true;
                     return console.log(err.message);
                 }
@@ -515,7 +525,7 @@ app.post('/nuevo-pedido', jsonParser, (req, res) => {
                     }
                 })
             }
-            // console.log(final_ticket_data);
+            console.log(final_ticket_data);
             generateTicket(final_ticket_data);
         });
 
@@ -530,19 +540,19 @@ app.post('/nuevo-pedido', jsonParser, (req, res) => {
         //     efectivo: null,
         //     productos: ticket_order.detalle
         // };
-        // close the database connection
-        db.close();
-        res.json({err});
+
     });
 
-
+    // close the database connection
+    db.close();
+    res.json({err});
 });
 
 
 app.post('/pagar-pedido', jsonParser, (req, res) => {  
     console.log('pagando pedido');
-    let query = `UPDATE Pedidos set estado = 1, enviado = 0, adeudo=0, abono=?, chalan="", fecha_pago=?, cajero=? WHERE id = ?`;
-    let values = [req.body.total, getCurrentDatetime(), req.body.cajero, req.body.order_id];
+    let query = `UPDATE Pedidos set estado = 1, enviado = 0, adeudo=0, abono=?, fecha_pago=? WHERE id = ?`;
+    let values = [req.body.total, getCurrentDatetime(), req.body.order_id];
 
     let db = getDBConnection();
     let error = false;
@@ -583,8 +593,8 @@ app.post('/pce-pedido', jsonParser, (req, res) => {
 
 app.post('/fiar-pedido', jsonParser, (req, res) => { 
     console.log('pagando pedido');
-    let query = `UPDATE Pedidos set estado = 2, enviado = 0, chalan="", cajero=?, abono=0 WHERE id = ?`;
-    let values = [req.body.cajero, req.body.order_id];
+    let query = `UPDATE Pedidos set estado = 2, enviado = 0, abono=0 WHERE id = ?`;
+    let values = [req.body.order_id];
 
     let db = getDBConnection();
     let error = false;
@@ -698,7 +708,7 @@ app.get('/estado-caja', jsonParser, async (req, res) => {
                     return null;
                 }
                 else if(rows_ti){
-                    // console.log(rows_ti);
+                    console.log(rows_ti);
                     let ingresos = rows_ti[0].total_ingresos;
                     return db.all('SELECT SUM(monto) as total_retiros FROM Retiros WHERE fecha_retiro = ?', [current_date], (err, rows_tr) => {
                         if(err){
@@ -706,7 +716,7 @@ app.get('/estado-caja', jsonParser, async (req, res) => {
                             return null;
                         }
                         else if(rows_tr){
-                            // console.log(rows_tr);
+                            console.log(rows_tr);
                             let retiros = rows_tr[0].total_retiros;
                             return res.json({caja, ingresos, retiros, err: false});
                             // return rows[0];
@@ -755,7 +765,7 @@ app.post('/retirar-dinero', jsonParser, (req, res) => {
 });
 
 app.post('/merma', jsonParser, (req, res) => {
-    // console.log('merma');
+    console.log('merma');
     let merma = req.body.merma;
     let producto = req.body.producto;
     let error = false;
@@ -775,7 +785,7 @@ app.post('/merma', jsonParser, (req, res) => {
 app.get('/stock', (req, res) => {
     let db = getDBConnection();
     getAllProducts(db, function(err, products){
-        // console.log(products);
+        console.log(products);
         if(err)
             res.json(returnError('Error'));
         
@@ -788,7 +798,7 @@ app.get('/stock', (req, res) => {
                 getOrderTotal(db, product.id, function(err_2, total_pedidos){
                     getMermaTotal(db, product.id, function(err_3, total_merma){
                         stock.push({id: product.id, nombre: product.name, total_compras, total_pedidos, total_merma});
-                        // console.log(stock);
+                        console.log(stock);
                         counter++;
                         if(counter >= total_items)
                             endResponse();
@@ -952,7 +962,7 @@ function generateTicket(order){
     console.log('Ticket nuevo generado!');
     
 
-    exec('PDFtoPrinter-OldVersion.exe ticket.pdf', (error, stdout, stderr) => {
+    exec('PDFtoPrinter.exe ticket.pdf', (error, stdout, stderr) => {
         if (error) {
             console.log(`error: ${error.message}`);
             return;
@@ -1019,24 +1029,6 @@ function getMermaTotal(db, product_id, callback){
 
 app.listen(port, () => {
     console.log(`Listening on port ${port}`);
-    setTimeout( () => {
-    if(data_available){
-        // Inicia servidor
-        exec('start_frontend.bat', (error, stdout, stderr) => {
-            if (error) {
-                console.log(`error: ${error.message}`);
-                return;
-            }
-            if (stderr) {
-                console.log(`stderr: ${stderr}`);
-                return;
-            }
-            console.log(`stdout: ${stdout}`);
-        });
-    }
-
-    else{
-        console.log('Error de lectura de bascula. Por favor cerrar programa, volver a conectar bascula y ejecutar el programa');
-    }
-}, 3 * 1000);
 });
+
+function calculateDaysBetweenDates(begin, end){}
