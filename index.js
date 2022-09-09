@@ -128,6 +128,10 @@ app.get('/', (req, res) => {
     res.send('Sale Point API');
 });
 
+app.get('/date', (req,res) => {
+    res.json({date: getCurrentDatetime()});
+});
+
 // Usuarios
 app.get('/usuarios', (req, res) => {
     let db = getDBConnection();
@@ -153,6 +157,13 @@ app.post('/nuevo-usuario', jsonParser, (req, res) => {
 app.post('/editar-usuario', jsonParser, (req, res) => {
     let query = `UPDATE Usuarios set nombre=?, rol=? WHERE id=?`;
     let params = [req.body.nombre, req.body.rol, req.body.user_id];
+    let err = updateItem(query, params);
+    res.json({err});
+});
+
+app.post('/cambiar-password-usuario', jsonParser, (req, res) => {
+    let query = `UPDATE Usuarios set pswd=? WHERE id=?`;
+    let params = [req.body.pass, req.body.user_id];
     let err = updateItem(query, params);
     res.json({err});
 });
@@ -351,14 +362,24 @@ app.get('/compras', (req, res) => {
 });
 
 app.post('/nuevo-compra', jsonParser, (req, res) => {
-    let query = `INSERT INTO Compras VALUES(null, ?, ?, ?, ?)`;
+    let query = `INSERT INTO Compras VALUES(null, ?, ?, ?, ?, ?)`;
     let date = req.body.date;
     if(req.body.supplier_id === 4){
         date = getCurrentDatetime();
     }
-    let values = [req.body.product_id, req.body.kg, date, req.body.supplier_id];
+    let values = [req.body.product_id, req.body.kg, date, req.body.supplier_id, req.body.costo];
     let err = insertItem(query, values);
-    res.json({err});
+
+    if(req.body.es_retiro){
+        let retiro_query = 'INSERT INTO Retiros VALUES(null, ?, ?, ?)';
+        let retiro_values = [getCurrentDatetime(), req.body.costo, `${ req.body.detalle_producto.name } - ${ req.body.detalle_proveedor.nombre}`];
+        let retiro_err = insertItem(retiro_query, retiro_values);
+        res.json({err, retiro: retiro_err});
+    }
+    else{
+        res.json({err});
+    }
+    
 });
 
 /*
@@ -390,6 +411,20 @@ app.get('/pedidos', (req, res) => {
         }
         console.log(rows);
         res.json(rows);
+    });
+
+    db.close();
+});
+
+app.get('/pedidos/:fecha', (req, res) => {
+    let db = getDBConnection();
+    let error = false;
+    db.all('SELECT * FROM Pedidos WHERE fecha=? AND estado=1 ORDER BY id DESC', [req.params.fecha], (err, rows) => {
+        if(err){
+            error = true;
+            res.json(returnError('Error in DB Query'));
+        }
+        res.json({ error, pedidos: rows[0] });
     });
 
     db.close();
@@ -648,12 +683,72 @@ app.post('/abrir-caja', jsonParser, (req, res) => {
 app.get('/cierres-caja', (req, res) => {
     let db = getDBConnection();
 
-    db.all('SELECT * FROM Caja WHERE estado = "cerrada" ORDER BY fecha DESC', [], (err, rows) => {
+    db.all(`
+    select 
+    Caja.fecha,
+    Caja.estado,
+    Caja.fondo,
+    Caja.total,
+    Caja.ingresos,
+    Caja.retiros,
+    (SELECT sum(Pedidos.total_pagar) FROM Pedidos WHERE Pedidos.fecha_pago = Caja.fecha AND Pedidos.estado = 1) as SumaIngresos,
+    (SELECT sum(Retiros.monto) FROM Retiros WHERE Retiros.fecha_retiro = Caja.fecha) as SumaRetiros
+    FROM Caja ORDER by Caja.fecha DESC;`, [], (err, rows) => {
         if(err){
             res.json(returnError('Error in DB Query'));
         }
         
             res.json({cierres_caja: rows, err: false});
+    });
+
+    db.close(); 
+});
+
+app.post('/cerrar-caja-previa', jsonParser, (req, res) => {
+    let db = getDBConnection();
+    let error = false;
+
+    console.log(req.body);  
+
+    db.run('UPDATE Caja SET estado="cerrada", retiros=?, ingresos=?, total=? WHERE fecha = ?', [req.body.retiros, req.body.ingresos, req.body.total, req.body.date], (err) => {
+        if (err) {
+            error = true;
+            console.log(err.message);
+        }
+        db.close();
+        console.log(error)
+        res.json({error});
+    });
+});
+
+app.get('/retiros', (req, res) => {
+    let db = getDBConnection();
+
+    console.log('retiros');
+
+    db.all('SELECT * FROM Retiros WHERE fecha_retiro = ? ORDER BY id DESC', [getCurrentDatetime()], (err, rows) => {
+        if(err){
+            res.json(returnError('Error in DB Query'));
+            return null;
+        }
+            res.json({retiros: rows, err: false});
+    });
+
+    db.close(); 
+});
+
+app.get('/retiros/:fecha', (req, res) => {
+    let db = getDBConnection();
+    let error = false;
+    console.log('retiros');
+
+    db.all('SELECT * FROM Retiros WHERE fecha_retiro = ? ORDER BY id DESC', [req.params.fecha], (err, rows) => {
+        if(err){
+            error = true;
+            res.json(returnError('Error in DB Query'));
+            return null;
+        }
+            res.json({retiros: rows, error});
     });
 
     db.close(); 
@@ -735,9 +830,9 @@ app.get('/estado-caja', jsonParser, async (req, res) => {
 
 // Retirar dinero
 app.post('/retirar-dinero', jsonParser, (req, res) => { 
-    let query = `INSERT INTO Retiros VALUES (null, ?, ?)`;
+    let query = `INSERT INTO Retiros VALUES (null, ?, ?, ?)`;
     let current_date = getCurrentDatetime()
-    let values = [current_date, req.body.monto];
+    let values = [current_date, req.body.monto, req.body.concepto];
 
     let db = getDBConnection();
     let error = false;
