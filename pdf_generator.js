@@ -181,4 +181,15 @@ let productos = [
 
 
 let req = { fecha, id_pedido, cajero, chalan, cliente, adeudo, estado_nota, efectivo, productos  }
-generateTicket(req);
+// generateTicket(req);
+
+
+// const doc_test = new jsPDF.jsPDF({
+//     orientation: "portrait",
+//     unit: "mm",
+//     format: [50, 290]
+// });
+// doc_test.setFontSize(14);
+// doc_test.text('Este es un ticket de', 1, 10);
+// doc_test.text('PRUEBA', 14, 20);
+// doc_test.save("ticket_prueba.pdf");

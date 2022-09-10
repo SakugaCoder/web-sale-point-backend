@@ -5,12 +5,14 @@ var cors = require('cors');
 const jsPDF = require("jspdf");
 const child_process = require("child_process");
 
+
+const frontendPath = 'C:/Users/HP/Desktop/sale-point/web-sale-point-frontend/build';
 const exec = child_process.exec;
 
 const { SerialPort } = require('serialport');
 const serial_port = new SerialPort({ path: 'COM7', baudRate: 9600 });
 
-let current_kg = 0;
+let current_kg = 1;
 let data_available = false;
 
 var bodyParser = require('body-parser')
@@ -22,6 +24,9 @@ const upload = multer({ dest: 'uploads/' });
 var jsonParser = bodyParser.json();
 
 let port = 3002;
+
+let seconds_without_data = 0;
+let comunication_lost = false;
 
 app.use(cors());
 app.use(express.static('uploads'));
@@ -38,6 +43,25 @@ setInterval( () => {
 }, 800);
 
 
+setInterval( () => {
+    if(!comunication_lost){
+        seconds_without_data++;
+        console.log('Segundos sin comunicacion', seconds_without_data);
+        if(seconds_without_data > 12){
+            console.log('Se perdio la comunicacion');   
+            comunication_lost = true;
+            current_kg = -100;
+        }
+    }
+}, 1000);
+
+setTimeout( () => {
+    console.log('Comunicacion recuperada');
+    comunication_lost = false;
+    seconds_without_data = 0;
+    current_kg = 10;
+}, 20000);
+
 serial_port.on('data', function (data) {
     let kg_str = data.toString();
     console.log('Data:', kg_str);
@@ -45,12 +69,16 @@ serial_port.on('data', function (data) {
 
     if(kg_str.length ===  10){
         data_available = true;
+        comunication_lost = false;
+        seconds_without_data = 0;
+
+        current_kg = 0;
         console.log('DATA AVAILABLE');
         current_kg = kg_str.replace(/\s/g, '');
         current_kg = Number(kg_str.split('kg')[0]);
         console.log(current_kg)
     }
-});
+}); 
 
 function getDBConnection(){
     let db = new sqlite3.Database('./db/main.db', sqlite3.OPEN_READWRITE, (err) => {
@@ -252,7 +280,6 @@ app.get('/clientes', (req, res) => {
     db.close();
 });
 
-
 app.post('/nuevo-cliente', (req, res) => {
     let query = `INSERT INTO Clientes VALUES(null, ?, ?, ?)`;
     let values = [req.body.nombre, req.body.telefono ] ;
@@ -372,7 +399,7 @@ app.post('/nuevo-compra', jsonParser, (req, res) => {
 
     if(req.body.es_retiro){
         let retiro_query = 'INSERT INTO Retiros VALUES(null, ?, ?, ?)';
-        let retiro_values = [getCurrentDatetime(), req.body.costo, `${ req.body.detalle_producto.name } - ${ req.body.detalle_proveedor.nombre}`];
+        let retiro_values = [date, req.body.costo, `${ req.body.detalle_producto.name } - ${ req.body.detalle_proveedor.nombre}`];
         let retiro_err = insertItem(retiro_query, retiro_values);
         res.json({err, retiro: retiro_err});
     }
@@ -400,8 +427,6 @@ app.delete('/eliminar-compra/:shopping_id', (req, res) => {
 
 
 // Pedidos
-
-// Proveedor
 app.get('/pedidos', (req, res) => {
     let db = getDBConnection();
 
@@ -424,7 +449,7 @@ app.get('/pedidos/:fecha', (req, res) => {
             error = true;
             res.json(returnError('Error in DB Query'));
         }
-        res.json({ error, pedidos: rows[0] });
+        res.json({ error, pedidos: rows });
     });
 
     db.close();
@@ -656,12 +681,11 @@ app.post('/login', jsonParser, (req, res) => {
     db.close(); 
 });
 
-
 // Caja
 app.post('/abrir-caja', jsonParser, (req, res) => { 
-    let query = `INSERT INTO Caja VALUES (?, "abierta", ?, ?, 0, 0)`;
+    let query = `INSERT INTO Caja VALUES (?, "abierta", ?, ?, 0, 0, ?)`;
     let current_date = getCurrentDatetime()
-    let values = [current_date, req.body.fondo, req.body.fondo];
+    let values = [current_date, req.body.fondo, req.body.fondo, req.body.cajero];
 
     let db = getDBConnection();
     let error = false;
@@ -679,7 +703,6 @@ app.post('/abrir-caja', jsonParser, (req, res) => {
 });
 
 //Cierres de caja
-
 app.get('/cierres-caja', (req, res) => {
     let db = getDBConnection();
 
@@ -691,6 +714,7 @@ app.get('/cierres-caja', (req, res) => {
     Caja.total,
     Caja.ingresos,
     Caja.retiros,
+    Caja.cajero,
     (SELECT sum(Pedidos.total_pagar) FROM Pedidos WHERE Pedidos.fecha_pago = Caja.fecha AND Pedidos.estado = 1) as SumaIngresos,
     (SELECT sum(Retiros.monto) FROM Retiros WHERE Retiros.fecha_retiro = Caja.fecha) as SumaRetiros
     FROM Caja ORDER by Caja.fecha DESC;`, [], (err, rows) => {
@@ -710,7 +734,7 @@ app.post('/cerrar-caja-previa', jsonParser, (req, res) => {
 
     console.log(req.body);  
 
-    db.run('UPDATE Caja SET estado="cerrada", retiros=?, ingresos=?, total=? WHERE fecha = ?', [req.body.retiros, req.body.ingresos, req.body.total, req.body.date], (err) => {
+    db.run('UPDATE Caja SET estado="cerrada", retiros=?, ingresos=?, total=?, cajero=? WHERE fecha = ?', [req.body.retiros, req.body.ingresos, req.body.total, req.body.cajero, req.body.date], (err) => {
         if (err) {
             error = true;
             console.log(err.message);
@@ -756,9 +780,10 @@ app.get('/retiros/:fecha', (req, res) => {
 
 // Cerrar caja
 app.post('/cerrar-caja', jsonParser, (req, res) => { 
-    let query = `UPDATE Caja SET estado="cerrada", total=?, ingresos=?, retiros=? WHERE fecha=?`;
+    console.log('Cerrando caja');
+    let query = `UPDATE Caja SET estado="cerrada", total=?, ingresos=?, retiros=?, cajero=? WHERE fecha=?`;
     let current_date = getCurrentDatetime()
-    let values = [req.body.total, req.body.ingresos, req.body.retiros, current_date];
+    let values = [req.body.total, req.body.ingresos, req.body.retiros, req.body.cajero, current_date];
 
     let db = getDBConnection();
     let error = false;
@@ -766,9 +791,10 @@ app.post('/cerrar-caja', jsonParser, (req, res) => {
     db.run(query, values, function(err) {
         if (err) {
             error = true;
-            console.log(err.message);
+            console.log(err);
             // return console.log(err.message);
         }
+        console.log('Error es:', err);
         db.close();
         res.json({error});
     });
@@ -899,7 +925,7 @@ app.get('/stock', (req, res) => {
 });
 
 app.get('/bascula', (req, res) => {
-    //console.log('bascula');
+    console.log('bascula');
     res.json({kg_bascula: current_kg});
 });
 
@@ -909,6 +935,19 @@ app.post('/imprimir-ticket', jsonParser ,(req, res) => {
     res.json({ok: true});
 });
 
+function printTicketPrueba(){
+    exec('PDFtoPrinter-OldVersion.exe ticket_prueba.pdf', (error, stdout, stderr) => {
+        if (error) {
+            console.log(`error: ${error.message}`);
+            return;
+        }
+        if (stderr) {
+            console.log(`stderr: ${stderr}`);
+            return;
+        }
+        console.log(`stdout: ${stdout}`);
+    });
+}
 
 function roundNumber(num){
     return Math.round((num + Number.EPSILON) * 100) / 100
@@ -1059,7 +1098,6 @@ function generateTicket(order){
         console.log(`stdout: ${stdout}`);
     });
 }
-
 // Stock functions
 function getAllProducts(db, callback){
     db.all('SELECT * FROM Productos', [], (err, rows) => {
@@ -1115,9 +1153,10 @@ function getMermaTotal(db, product_id, callback){
 app.listen(port, () => {
     console.log(`Listening on port ${port}`);
     setTimeout( () => {
-    if(data_available){
+    if(!data_available){
         // Inicia servidor
-        exec('start_frontend.bat', (error, stdout, stderr) => {
+        exec('serve -s '+ frontendPath, (error, stdout, stderr) => {
+            console.log('Servidor iniciado');
             if (error) {
                 console.log(`error: ${error.message}`);
                 return;
@@ -1128,6 +1167,23 @@ app.listen(port, () => {
             }
             console.log(`stdout: ${stdout}`);
         });
+
+        setTimeout( () => {
+            exec('start chrome http://localhost:5000', (error, stdout, stderr) => {
+                console.log('Pagina principal abierta');
+                if (error) {
+                    console.log(`error: ${error.message}`);
+                    return;
+                }
+                if (stderr) {
+                    console.log(`stderr: ${stderr}`);
+                    return;
+                }
+                console.log(`stdout: ${stdout}`);
+            });
+        }, 12 * 1000);
+
+        printTicketPrueba();
     }
 
     else{
