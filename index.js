@@ -5,14 +5,17 @@ var cors = require('cors');
 const jsPDF = require("jspdf");
 const child_process = require("child_process");
 
+require('dotenv').config()
 
-const frontendPath = 'C:/Users/HP/Desktop/sale-point/web-sale-point-frontend/build';
+console.log(process.env.FRONTEND_PAT);
+
+const frontendPath = process.env.FRONTEND_PAT;
 const exec = child_process.exec;
 
 const { SerialPort } = require('serialport');
 const serial_port = new SerialPort({ path: 'COM7', baudRate: 9600 });
 
-let current_kg = 1;
+let current_kg = 0;
 let data_available = false;
 
 var bodyParser = require('body-parser')
@@ -44,24 +47,18 @@ setInterval( () => {
 }, 800);
 
 
-// setInterval( () => {
-//     if(!comunication_lost){
-//         seconds_without_data++;
-//         console.log('Segundos sin comunicacion', seconds_without_data);
-//         if(seconds_without_data > 12){
-//             console.log('Se perdio la comunicacion');   
-//             comunication_lost = true;
-//             current_kg = -100;
-//         }
-//     }
-// }, 1000);
+ setInterval( () => {
+     if(!comunication_lost){
+         seconds_without_data++;
+         console.log('Segundos sin comunicacion', seconds_without_data);
+         if(seconds_without_data > 12){
+             console.log('Se perdio la comunicacion');   
+             comunication_lost = true;
+             current_kg = -100;
+         }
+     }
+}, 1000);
 
-// setTimeout( () => {
-//     console.log('Comunicacion recuperada');
-//     comunication_lost = false;
-//     seconds_without_data = 0;
-//     current_kg = 10;
-// }, 20000);
 
 serial_port.on('data', function (data) {
     let kg_str = data.toString();
@@ -159,6 +156,7 @@ function obtenerAdeudo(callback, id_usuario, id_pedido){
     let params = null;
 
     if(id_pedido){
+        console.log("ID pedido",id_pedido);
         query = 'SELECT SUM(adeudo) as deuda_cliente FROM Pedidos WHERE id_cliente = ? AND id != ?';
         params = [id_usuario, id_pedido];
     }
@@ -167,13 +165,14 @@ function obtenerAdeudo(callback, id_usuario, id_pedido){
         query = 'SELECT SUM(adeudo) as deuda_cliente FROM Pedidos WHERE id_cliente = ?';
         params = [id_usuario]
     }
+
     db.all(query, params, (err, rows) => {
         
         if(err){
             // res.json(returnError('Error in DB query'));
             callback(null);
             db.close();
-            throw(err);            
+            // throw(err);            
             
         }
         if(rows){
@@ -187,6 +186,13 @@ function obtenerAdeudo(callback, id_usuario, id_pedido){
     });
     db.close();
 }
+
+app.get('/obtener-adeudo/:id_usuario/:id_pedido', async (req, res) => {
+    obtenerAdeudo(function(adeudo){
+        console.log(adeudo);
+        res.json({adeudo})
+    }, req.params.id_usuario, req.params.id_pedido);
+}); 
 
 app.get('/', (req, res) => {
     res.send('Sale Point API');
@@ -204,7 +210,7 @@ app.get('/usuarios', (req, res) => {
         if(err){
             res.json(returnError('Error in DB query'));
             db.close();
-            throw(err);            
+            // throw(err);            
         }
         res.json(rows);
     });
@@ -246,7 +252,7 @@ app.get('/deuda-usuario/:id_client', (req, res) => {
         if(err){
             res.json(returnError('Error in DB query'));
             db.close();
-            throw(err);            
+            // throw(err);            
         }
         res.json(rows);
     });
@@ -1196,7 +1202,7 @@ function getMermaTotal(db, product_id, callback){
 app.listen(port, () => {
     console.log(`Listening on port ${port}`);
     setTimeout( () => {
-    if(data_available){
+    if(!data_available){
         // Inicia servidor
         exec('serve -s '+ frontendPath, (error, stdout, stderr) => {
             console.log('Servidor iniciado');

@@ -1,1 +1,1 @@
-node index.js
+node web-sale-point-backend/index.js
