@@ -34,6 +34,7 @@ app.use(express.static('uploads'));
 
 serial_port.on('error', function(err) {
     console.log('Error 2 de lectura de bascula. Por favor cerrar programa, volver a conectar bascula y ejecutar el programa');
+    // current_kg = -100;
 });
 
 // tare
@@ -43,24 +44,24 @@ setInterval( () => {
 }, 800);
 
 
-setInterval( () => {
-    if(!comunication_lost){
-        seconds_without_data++;
-        console.log('Segundos sin comunicacion', seconds_without_data);
-        if(seconds_without_data > 12){
-            console.log('Se perdio la comunicacion');   
-            comunication_lost = true;
-            current_kg = -100;
-        }
-    }
-}, 1000);
+// setInterval( () => {
+//     if(!comunication_lost){
+//         seconds_without_data++;
+//         console.log('Segundos sin comunicacion', seconds_without_data);
+//         if(seconds_without_data > 12){
+//             console.log('Se perdio la comunicacion');   
+//             comunication_lost = true;
+//             current_kg = -100;
+//         }
+//     }
+// }, 1000);
 
-setTimeout( () => {
-    console.log('Comunicacion recuperada');
-    comunication_lost = false;
-    seconds_without_data = 0;
-    current_kg = 10;
-}, 20000);
+// setTimeout( () => {
+//     console.log('Comunicacion recuperada');
+//     comunication_lost = false;
+//     seconds_without_data = 0;
+//     current_kg = 10;
+// }, 20000);
 
 serial_port.on('data', function (data) {
     let kg_str = data.toString();
@@ -150,6 +151,41 @@ function deleteItem(query, values){
     // close the database connection
     db.close();
     return err;
+}
+
+function obtenerAdeudo(callback, id_usuario, id_pedido){
+    let db = getDBConnection();
+    let query = '';
+    let params = null;
+
+    if(id_pedido){
+        query = 'SELECT SUM(adeudo) as deuda_cliente FROM Pedidos WHERE id_cliente = ? AND id != ?';
+        params = [id_usuario, id_pedido];
+    }
+
+    else{
+        query = 'SELECT SUM(adeudo) as deuda_cliente FROM Pedidos WHERE id_cliente = ?';
+        params = [id_usuario]
+    }
+    db.all(query, params, (err, rows) => {
+        
+        if(err){
+            // res.json(returnError('Error in DB query'));
+            callback(null);
+            db.close();
+            throw(err);            
+            
+        }
+        if(rows){
+            callback(rows[0].deuda_cliente);
+        }
+        else{
+            callback(null);
+        }
+        
+        // res.json(rows);
+    });
+    db.close();
 }
 
 app.get('/', (req, res) => {
@@ -516,7 +552,8 @@ function getOrderStatusText(n){
     };
 }
 
-app.post('/nuevo-pedido', jsonParser, (req, res) => {
+app.post('/nuevo-pedido', jsonParser, async (req, res) => {
+
     let query = `INSERT INTO Pedidos VALUES(null, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`;
     const getItemsList = items => {
         return items.map( item => item.name + ' x ' + item.kg + ' ' +item.venta_por).join(', ');
@@ -557,26 +594,32 @@ app.post('/nuevo-pedido', jsonParser, (req, res) => {
             //     err = true;
             //     return console.log(err.message);
             // }
-            let order_data = rows[0];
-            let final_ticket_data = {
-                id_pedido: order_data.id,
-                fecha: order_data.fecha,
-                cajero: req.body.cajero,
-                chalan: order_data.chalan ? order_data.chalan.split(',')[0] : 'NA',
-                cliente: order_data.id_cliente,
-                adeudo: order_data.adeudo,
-                estado_nota: getOrderStatusText(order_data.estado),
-                efectivo: order_data.efectivo,
-                productos: req.body.items.map( function(item){ 
-                    return {
-                        nombre_producto: item.name,
-                        precio_kg: item.price,
-                        cantidad_kg: item.kg
-                    }
-                })
-            }
-            // console.log(final_ticket_data);
-            generateTicket(final_ticket_data);
+            obtenerAdeudo(function(adeudo){
+                let order_data = rows[0];
+                let final_ticket_data = {
+                    id_pedido: order_data.id,
+                    fecha: order_data.fecha,
+                    cajero: req.body.cajero,
+                    chalan: order_data.chalan ? order_data.chalan.split(',')[0] : 'NA',
+                    cliente: order_data.id_cliente,
+                    adeudo: adeudo,
+                    estado_nota: getOrderStatusText(order_data.estado),
+                    efectivo: order_data.efectivo,
+                    productos: req.body.items.map( function(item){ 
+                        return {
+                            nombre_producto: item.name,
+                            precio_kg: item.price,
+                            cantidad_kg: item.kg
+                        }
+                    })
+                }
+                console.log('******************************** Data del ticket', final_ticket_data);
+
+                // console.log(final_ticket_data);
+                generateTicket(final_ticket_data);
+            }, req.body.client.id);
+
+          
         });
 
         // let final_ticket_data = {
@@ -1153,7 +1196,7 @@ function getMermaTotal(db, product_id, callback){
 app.listen(port, () => {
     console.log(`Listening on port ${port}`);
     setTimeout( () => {
-    if(!data_available){
+    if(data_available){
         // Inicia servidor
         exec('serve -s '+ frontendPath, (error, stdout, stderr) => {
             console.log('Servidor iniciado');
