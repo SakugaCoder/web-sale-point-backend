@@ -15,7 +15,7 @@ const exec = child_process.exec;
 const { SerialPort } = require('serialport');
 const serial_port = new SerialPort({ path: 'COM7', baudRate: 9600 });
 
-let current_kg = 0;
+let current_kg = 1;
 let data_available = false;
 
 var bodyParser = require('body-parser')
@@ -47,17 +47,17 @@ setInterval( () => {
 }, 800);
 
 
- setInterval( () => {
-     if(!comunication_lost){
-         seconds_without_data++;
-         console.log('Segundos sin comunicacion', seconds_without_data);
-         if(seconds_without_data > 12){
-             console.log('Se perdio la comunicacion');   
-             comunication_lost = true;
-             current_kg = -100;
-         }
-     }
-}, 1000);
+//  setInterval( () => {
+//      if(!comunication_lost){
+//          seconds_without_data++;
+//          console.log('Segundos sin comunicacion', seconds_without_data);
+//          if(seconds_without_data > 12){
+//              console.log('Se perdio la comunicacion');   
+//              comunication_lost = true;
+//              current_kg = -100;
+//          }
+//      }
+// }, 1000);
 
 
 serial_port.on('data', function (data) {
@@ -187,7 +187,7 @@ function obtenerAdeudo(callback, id_usuario, id_pedido){
     db.close();
 }
 
-app.get('/obtener-adeudo/:id_usuario/:id_pedido', async (req, res) => {
+app.get('/obtener-adeudo/:id_usuario', async (req, res) => {
     obtenerAdeudo(function(adeudo){
         console.log(adeudo);
         res.json({adeudo})
@@ -311,7 +311,7 @@ app.delete('/eliminar-producto/:product_id', jsonParser, (req, res) => {
 app.get('/clientes', (req, res) => {
     let db = getDBConnection();
 
-    db.all('SELECT * FROM clientes ORDER BY id ASC', (err, rows) => {
+    db.all('SELECT * FROM clientes ORDER BY nombre ASC', (err, rows) => {
         if(err){
             res.json(returnError('Error in DB Query'));
         }
@@ -322,14 +322,13 @@ app.get('/clientes', (req, res) => {
     db.close();
 });
 
-app.post('/nuevo-cliente', (req, res) => {
-    let query = `INSERT INTO Clientes VALUES(null, ?, ?, ?)`;
-    let values = [req.body.nombre, req.body.telefono ] ;
+app.post('/nuevo-cliente', jsonParser, (req, res) => {
+    let query = `INSERT INTO Clientes VALUES(null, ?, ?, null)`;
+    let values = [req.body.nombre, req.body.telefono] ;
     console.log(values);
     let err = insertItem(query, values);
-    console.log(err);
-    // res.json({err});   
-    res.redirect('http://localhost:3000/clientes');
+    res.json({error: err});   
+
 });
 
 app.post('/editar-cliente', jsonParser, (req, res) => {
@@ -671,8 +670,8 @@ app.post('/pagar-pedido', jsonParser, (req, res) => {
 
 app.post('/pce-pedido', jsonParser, (req, res) => {  
     console.log('pagando pedido');
-    let query = `UPDATE Pedidos set estado = 4, enviado = 0, abono=0, chalan=? WHERE id = ?`;
-    let values = [req.body.chalan, req.body.order_id];
+    let query = `UPDATE Pedidos set estado = 4, enviado = 0, abono=0, chalan=?, cajero=? WHERE id = ?`;
+    let values = [req.body.chalan, req.body.cajero, req.body.order_id, ];
 
     let db = getDBConnection();
     let error = false;
@@ -776,6 +775,27 @@ app.get('/cierres-caja', (req, res) => {
 
     db.close(); 
 });
+
+app.get('/sumatoria-productos/:fecha', jsonParser, (req,res) => {
+    let db = getDBConnection();
+
+    db.all(`
+    SELECT 
+    name as nombre, 
+    price as precio,
+        (SELECT SUM(Pedidos_detalle.cantidad_kg) FROM Pedidos_detalle, Pedidos WHERE Pedidos_detalle.id_pedido = Pedidos.id AND Pedidos_detalle.id_producto = Productos.id AND Pedidos.fecha = ?) as Sumatoria
+    FROM Productos ORDER BY nombre ASC
+    `, [req.params.fecha], (err, rows) => {
+        if(err){
+            res.json(returnError('Error in DB Query'));
+        }
+        
+        res.json({sumatorias: rows, error: false});
+    });
+
+    db.close(); 
+
+}),
 
 app.post('/cerrar-caja-previa', jsonParser, (req, res) => {
     let db = getDBConnection();
@@ -1002,9 +1022,35 @@ function roundNumber(num){
     return Math.round((num + Number.EPSILON) * 100) / 100
 }
 
+
+function getFullDateTime(){
+    let date_ob = new Date();
+    // current date
+    // adjust 0 before single digit date
+    let date = ("0" + date_ob.getDate()).slice(-2);
+
+    // current month
+    let month = ("0" + (date_ob.getMonth() + 1)).slice(-2);
+
+    // current year
+    let year = date_ob.getFullYear();
+
+    // current hours
+    let hours = date_ob.getHours();
+
+    // current minutes
+    let minutes = date_ob.getMinutes();
+
+    // current seconds
+    let seconds = date_ob.getSeconds();
+
+    return year + "-" + month + "-" + date + " " + hours + ":" + minutes; //+ ":" + seconds;
+}
+
 function generateTicket(order){
-    let nombre_negocio = 'Verduleria Trenado';
-    let direccion = 'La sierrita, 76137, Queretaro centro';
+    console.log('Generando ticket');
+    let nombre_negocio = 'Aguacates y papayas cynthia';
+    let dt = getFullDateTime();
 
     function getTotal(products){
         let total = 0;
@@ -1031,52 +1077,54 @@ function generateTicket(order){
     
     let current_y = 0;
     
-    
     doc.setFontSize(8);
     
-    doc.text(nombre_negocio, 13, 2);
-    doc.text(direccion, 2, 6);
+    doc.text(nombre_negocio, 6, 2);
+    doc.text(dt, 13, 6);
     
     doc.setFont("helvetica", "normal");
-    doc.text('Fecha:', 1, 14);
+    doc.text('Fecha de compra:', 1, 14);
     doc.setFont("helvetica", "bold");
-    doc.text(order.fecha, 10, 14);
-    
-    doc.setFont("helvetica", "normal");
-    doc.text('ID pedido:', 28, 14);
-    doc.setFont("helvetica", "bold");
-    doc.text(String(order.id_pedido), 42, 14);
+    doc.text(order.fecha, 24, 14);
     
     current_y = 18;
-    
+    // 1 current_y - 10 current_y
     doc.setFont("helvetica", "normal");
-    doc.text('Cajero:', 1, current_y);
+    doc.text('ID pedido:', 1, current_y);
     doc.setFont("helvetica", "bold");
-    doc.text(String(order.cajero), 10, current_y);
+    doc.text(String(order.id_pedido), 15, current_y);
     
+    // 28 current_y - 38 current_y 18
     doc.setFont("helvetica", "normal");
-    doc.text('Chalan:', 28, current_y);
+    doc.text('Cajero:', 28, current_y);
     doc.setFont("helvetica", "bold");
-    doc.text(String(order.chalan), 38, current_y);
+    doc.text(String(order.cajero), 38, current_y);
     
     current_y = 22;
-    
+    // 1 current_y - 11 current_y 22
     doc.setFont("helvetica", "normal");
-    doc.text('Cliente:', 1, current_y);
+    doc.text('Chalan:', 1, current_y);
     doc.setFont("helvetica", "bold");
-    doc.text(String(order.cliente), 11, current_y);
+    doc.text(String(order.chalan), 15, current_y);
     
+
+    // 28 current_y - 39 current_y
     doc.setFont("helvetica", "normal");
-    doc.text('Adeudo:', 28, current_y);
+    doc.text('Cliente:', 28, current_y);
     doc.setFont("helvetica", "bold");
-    doc.text(String(order.adeudo), 39, current_y);
+    doc.text(String(order.cliente), 38, current_y);
     
     current_y = 26;
+    // 1 current_y - 10 current_y
+    doc.setFont("helvetica", "normal");
+    doc.text('Adeudo actual:', 1, current_y);
+    doc.setFont("helvetica", "bold");
+    doc.text(String(order.adeudo), 20, current_y);
     
     doc.setFont("helvetica", "normal");
-    doc.text('Estado nota:', 1, current_y);
+    doc.text('Nota:', 28, current_y);
     doc.setFont("helvetica", "bold");
-    doc.text(order.estado_nota, 18, current_y);
+    doc.text(order.estado_nota, 38, current_y);
     
     current_y = 32;
     
@@ -1202,7 +1250,7 @@ function getMermaTotal(db, product_id, callback){
 app.listen(port, () => {
     console.log(`Listening on port ${port}`);
     setTimeout( () => {
-    if(!data_available){
+    if(data_available){
         // Inicia servidor
         exec('serve -s '+ frontendPath, (error, stdout, stderr) => {
             console.log('Servidor iniciado');
