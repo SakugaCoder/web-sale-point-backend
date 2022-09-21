@@ -175,8 +175,8 @@ function obtenerAdeudo(callback, id_usuario, id_pedido){
             // throw(err);            
             
         }
-        if(rows){
-            callback(rows[0].deuda_cliente);
+        if(rows.length > 0){
+            callback(roundNumber(rows[0].deuda_cliente));
         }
         else{
             callback(null);
@@ -186,6 +186,35 @@ function obtenerAdeudo(callback, id_usuario, id_pedido){
     });
     db.close();
 }
+
+function obtenerIdUsuario(nombre, callback){
+    let db = getDBConnection();
+    
+    db.all('SELECT id from usuarios WHERE nombre=?', [nombre],(err, rows) => {
+        if(err){
+            db.close();
+            callback({error: true, id: null});
+            return null;
+            // throw(err);            
+        }
+        
+        if(rows.length > 0){
+            callback({error: false, id: rows[0].id});
+        }
+        else{
+            callback({error: false, id: null});
+        }
+        
+        db.close();
+    });
+    
+}
+
+app.post('/id-usuario/', jsonParser, async (req, res) => {
+    obtenerIdUsuario(req.body.username, function(result){
+        res.json(result);
+    });
+});
 
 app.get('/obtener-adeudo/:id_usuario', async (req, res) => {
     obtenerAdeudo(function(adeudo){
@@ -225,8 +254,8 @@ app.post('/nuevo-usuario', jsonParser, (req, res) => {
 });
 
 app.post('/editar-usuario', jsonParser, (req, res) => {
-    let query = `UPDATE Usuarios set nombre=?, rol=? WHERE id=?`;
-    let params = [req.body.nombre, req.body.rol, req.body.user_id];
+    let query = `UPDATE Usuarios set rol=? WHERE id=?`;
+    let params = [req.body.rol, req.body.user_id];
     let err = updateItem(query, params);
     res.json({err});
 });
@@ -604,7 +633,7 @@ app.post('/nuevo-pedido', jsonParser, async (req, res) => {
                 let final_ticket_data = {
                     id_pedido: order_data.id,
                     fecha: order_data.fecha,
-                    cajero: req.body.cajero,
+                    cajero: req.body.cajero_id, //req.body.cajero,
                     chalan: order_data.chalan ? order_data.chalan.split(',')[0] : 'NA',
                     cliente: order_data.id_cliente,
                     adeudo: adeudo,
@@ -714,12 +743,12 @@ app.post('/fiar-pedido', jsonParser, (req, res) => {
 app.post('/login', jsonParser, (req, res) => {
     let db = getDBConnection();
 
-    db.all('SELECT rol FROM Usuarios WHERE nombre=? AND pswd=?', [req.body.name, req.body.pswd], (err, rows) => {
+    db.all('SELECT rol, id FROM Usuarios WHERE nombre=? AND pswd=?', [req.body.name, req.body.pswd], (err, rows) => {
         if(err){
             res.json(returnError('Error in DB Query'));
         }
         if(rows.length > 0){
-            res.json({rol: rows[0].rol, err: false});
+            res.json({rol: rows[0].rol, err: false, id: rows[0].id});
         }
         else{
             res.json({err: true});
@@ -783,6 +812,7 @@ app.get('/sumatoria-productos/:fecha', jsonParser, (req,res) => {
     SELECT 
     name as nombre, 
     price as precio,
+    venta_por,
         (SELECT SUM(Pedidos_detalle.cantidad_kg) FROM Pedidos_detalle, Pedidos WHERE Pedidos_detalle.id_pedido = Pedidos.id AND Pedidos_detalle.id_producto = Productos.id AND Pedidos.fecha = ?) as Sumatoria
     FROM Productos ORDER BY nombre ASC
     `, [req.params.fecha], (err, rows) => {
@@ -977,7 +1007,7 @@ app.get('/stock', (req, res) => {
             getShoppingTotal(db, product.id, function(err_2, total_compras){
                 getOrderTotal(db, product.id, function(err_2, total_pedidos){
                     getMermaTotal(db, product.id, function(err_3, total_merma){
-                        stock.push({id: product.id, nombre: product.name, total_compras, total_pedidos, total_merma});
+                        stock.push({id: product.id, venta_por: product.venta_por, nombre: product.name, total_compras, total_pedidos, total_merma});
                         // console.log(stock);
                         counter++;
                         if(counter >= total_items)
@@ -1090,7 +1120,7 @@ function generateTicket(order){
     current_y = 18;
     // 1 current_y - 10 current_y
     doc.setFont("helvetica", "normal");
-    doc.text('ID pedido:', 1, current_y);
+    doc.text('ID nota:', 1, current_y);
     doc.setFont("helvetica", "bold");
     doc.text(String(order.id_pedido), 15, current_y);
     
@@ -1117,14 +1147,28 @@ function generateTicket(order){
     current_y = 26;
     // 1 current_y - 10 current_y
     doc.setFont("helvetica", "normal");
-    doc.text('Adeudo actual:', 1, current_y);
+    doc.text('Deuda actual:', 1, current_y);
     doc.setFont("helvetica", "bold");
-    doc.text(String(order.adeudo), 20, current_y);
+    doc.text("$"+String(order.adeudo), 19, current_y);
     
+
+    let en = '';
+    if(order.estado_nota === 'Pagado'){
+        en = 'Pagada';
+    }
+
+    else if(order.estado_nota === 'PCE'){
+        en = 'PCE';
+    }
+
+    else if(order.estado_nota === 'Adeudo'){
+        en = 'Fiada';
+    }
+
     doc.setFont("helvetica", "normal");
-    doc.text('Nota:', 28, current_y);
+    doc.text('Nota:', 31, current_y);
     doc.setFont("helvetica", "bold");
-    doc.text(order.estado_nota, 38, current_y);
+    doc.text(en, 38, current_y);
     
     current_y = 32;
     
